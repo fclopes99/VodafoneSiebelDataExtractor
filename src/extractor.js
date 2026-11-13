@@ -6,7 +6,8 @@
 // API (window.__steExtractor):
 //   version            - script version, set by the app in window.__STE_VERSION
 //   detect()           - [{index, title, counter}] lists with data on the page
-//   start(index)       - starts extracting list #index in the background
+//   start(index, opts) - starts extracting list #index in the background
+//                        opts.maxColumns: export only the first N columns (1-15); empty = all
 //   status()           - {state: idle|running|done|error|stopped, message, fraction, error}
 //   stop()             - asks a running extraction to stop
 //   takeResult()       - {name, base64, rows, total, pages, warnings} once state is "done"
@@ -359,10 +360,35 @@
     return { t: "s", v: text };
   }
 
-  function fileNameFor(title) {
-    const base = String(title || "Siebel_list")
+  // Letters and digits only, accents removed: "Água Lda." -> "Agua_Lda"
+  function safeName(text, max) {
+    return String(text || "")
       .normalize("NFD").replace(/[̀-ͯ]/g, "")
-      .replace(/[^A-Za-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 60) || "Siebel_list";
+      .replace(/[^A-Za-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, max).replace(/_+$/, "");
+  }
+
+  // The client the page is about: the "Cliente:NAME" breadcrumb at the top of Siebel,
+  // or else the title of the "Titular da conta" box.
+  function findClient() {
+    for (const doc of allDocuments()) {
+      const crumbs = Array.from(doc.querySelectorAll(".siebui-crumb, #siebui-threadbar li"))
+        .map((el) => clean(el.textContent)).filter((t) => /^cliente\s*:/i.test(t));
+      if (crumbs.length) return clean(crumbs[crumbs.length - 1].replace(/^cliente\s*:/i, ""));
+    }
+    for (const doc of allDocuments()) {
+      for (const box of doc.querySelectorAll("[id^='S_A']")) {
+        if (!/titular da conta/i.test(box.getAttribute("aria-label") || "")) continue;
+        const t = box.querySelector(".siebui-applet-title label, .siebui-applet-title");
+        if (t && clean(t.textContent)) return clean(t.textContent);
+      }
+    }
+    return "";
+  }
+
+  const MAX_CLIENT_CHARS = 40; // long client names are cut so the file name stays short
+
+  function fileNameFor(title, client) {
+    const base = [safeName(client, MAX_CLIENT_CHARS), safeName(title, 60) || "Siebel_list"].filter(Boolean).join("_");
     const d = new Date();
     const p = (x) => String(x).padStart(2, "0");
     return base + "_" + d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + "_" + p(d.getHours()) + p(d.getMinutes()) + ".xlsx";
@@ -393,13 +419,17 @@
     job.fraction = fraction == null ? null : Math.min(fraction, 1);
   }
 
-  async function extract(grid) {
+  const MAX_COLUMNS_LIMIT = 15;
+
+  async function extract(grid, maxColumns) {
     job.pages = 0;
     workingMethod = -1;
-    log("Start. Grid " + grid.id + " \"" + grid.title + "\", counter \"" + counterText(grid) + "\"");
+    log("Start. Grid " + grid.id + " \"" + grid.title + "\", counter \"" + counterText(grid) + "\", columns: " +
+      (maxColumns ? "first " + maxColumns : "all"));
 
-    const cols = getColumns(grid);
+    let cols = getColumns(grid);
     if (!cols.length) throw new Error("Could not find the column headers of the list \"" + grid.title + "\".");
+    if (maxColumns) cols = cols.slice(0, maxColumns);
     log("Columns (" + cols.length + "): " + cols.map((c) => c.key).join(", "));
 
     // Go to the first page if we are not on it.
@@ -505,18 +535,31 @@
 
   function detect() {
     lastGrids = findGrids();
-    return lastGrids.map((g, index) => ({ index, title: g.title, counter: counterText(g), id: g.id }));
+    const client = findClient();
+    return lastGrids.map((g, index) => {
+      const columns = getColumns(g).map((c) => c.label);
+      return { index, title: g.title, counter: counterText(g), id: g.id, client, columns };
+    });
   }
 
-  function start(index) {
+  function start(index, opts) {
     if (job.state === "running") return false;
+    let maxColumns = opts && opts.maxColumns;
+    if (maxColumns != null && maxColumns !== "") {
+      maxColumns = Number(maxColumns);
+      if (!Number.isInteger(maxColumns) || maxColumns < 1 || maxColumns > MAX_COLUMNS_LIMIT) {
+        throw new Error("The number of columns must be a whole number from 1 to " + MAX_COLUMNS_LIMIT + ".");
+      }
+    } else {
+      maxColumns = null;
+    }
     if (!lastGrids.length) detect();
     const grid = lastGrids[index || 0];
     if (!grid) throw new Error("No Siebel list with data was found in this tab.");
     Object.assign(job, { state: "running", message: "Starting...", fraction: null, error: "", stopRequested: false, grid, pages: 0, result: null });
     (async () => {
       try {
-        const res = await extract(grid);
+        const res = await extract(grid, maxColumns);
         progress("Creating the Excel file...");
         await sleep(20);
         const bytes = window.__SteXlsx.build({
@@ -525,9 +568,10 @@
           rows: res.rows.map((r) => r.map(toCell)),
         });
         job.result = {
-          name: fileNameFor(grid.title),
+          name: fileNameFor(grid.title, findClient()),
           base64: toBase64(bytes),
           rows: res.rows.length,
+          columns: res.cols.length,
           total: res.total,
           pages: res.pages,
           warnings: res.warnings,
@@ -568,6 +612,6 @@
     status,
     stop: () => { job.stopRequested = true; },
     takeResult,
-    _test: { parseCounter, toCell, fileNameFor },
+    _test: { parseCounter, toCell, fileNameFor, findClient },
   };
 })();

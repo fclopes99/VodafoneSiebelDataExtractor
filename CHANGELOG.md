@@ -1,5 +1,12 @@
 # Changelog
 
+## 4.0.0 – 2026-11-13
+- Choose the columns before extracting: **only the first N columns** (N from 1 to 15) or
+  **all columns**. The panel always opens on "only the first 8 columns" and shows their names.
+  Invalid numbers are refused and the button stays grey.
+- The file name starts with the client name (accents removed, cut at 40 characters).
+- The "Done!" message also says how many columns were exported.
+
 ## 3.1.1 – 2026-11-13
 - Fix: a panel left open on the page by an older version was reused, so the old code ran.
   The new version now replaces it.

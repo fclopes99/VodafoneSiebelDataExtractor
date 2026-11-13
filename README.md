@@ -15,14 +15,17 @@ with nothing to install (company-managed Chrome blocks extensions and outside pr
 
 1. Open the list in Siebel, with the results showing.
 2. Click **Extract to Excel** on the bookmarks bar. A small green panel appears.
-3. Click **Extract to Excel** in the panel and wait until it says **Done!**
-4. The Excel file is in **Downloads**.
+3. Choose the columns: **only the first N columns** (1 to 15, it starts on 8 every time) or
+   **all columns**.
+4. Click **Extract to Excel** in the panel and wait until it says **Done!**
+5. The Excel file is in **Downloads**, named with the client (cut at 40 characters), the list and the date, e.g.
+   `DOMINGOS_EUSEBIO_TEIXEIRA_LOPES_LDA_Contratos_de_Permanencia_Activos_2026-11-13_1530.xlsx`.
 
 If something goes wrong, the panel shows a red box: click **Copy error** and send the text.
 
 ## What ends up in the Excel file
 
-- Only the columns visible in Siebel, in the same order.
+- The columns you chose, in the same order as in Siebel (hidden columns are never exported).
 - Header row: bold, slightly bigger, frozen at the top, with filter arrows.
 - Amounts like `3,79` and short whole numbers like `30` → real numbers.
 - `14-07-2025` → real date; `14-07-2025 16:25:36` → real date and time (dd-mm-yyyy).

@@ -5,28 +5,33 @@ import sys
 import openpyxl
 
 
-def check(path, total):
+def check(path, total, headers=None):
+    """headers: the exact header row expected (None = don't compare)."""
     ws = openpyxl.load_workbook(path).active
     rows = list(ws.iter_rows(values_only=True))
-    hdr, data = rows[0], rows[1:]
+    hdr, data = list(rows[0]), rows[1:]
     ci = {h: i for i, h in enumerate(hdr)}
     problems = []
-    ids = [r[ci["Serviço"]] for r in data]
-    if ids != [str(910000000 + i) for i in range(1, total + 1)]:
-        problems.append("ids wrong/out of order: %s ..." % ids[:3])
-    first = data[0]
-    if first[ci["Multa Mensal s/ IVA"]] != 1.5:
-        problems.append("amount not a number: %r" % first[ci["Multa Mensal s/ IVA"]])
-    if not isinstance(first[ci["Data de Início"]], datetime.datetime):
-        problems.append("date not a date")
-    if not isinstance(first[ci["Actualizado em"]], datetime.datetime):
-        problems.append("date-time not a date")
-    if not isinstance(first[ci["IMEI"]], str):
-        problems.append("IMEI not text")
-    if first[ci["Duração"]] != 1:
-        problems.append("duration %r" % first[ci["Duração"]])
-    if first[ci["Pendente"]] not in ("Y", "N"):
-        problems.append("flag %r" % first[ci["Pendente"]])
+    if headers is not None and hdr != list(headers):
+        problems.append("headers %s, expected %s" % (hdr, list(headers)))
+    if len(data) != total:
+        problems.append("%d data rows, expected %d" % (len(data), total))
+    if "Serviço" in ci:
+        ids = [r[ci["Serviço"]] for r in data]
+        if ids != [str(910000000 + i) for i in range(1, total + 1)]:
+            problems.append("ids wrong/out of order: %s ..." % ids[:3])
+    first = data[0] if data else ()
+    expect = {
+        "Multa Mensal s/ IVA": lambda v: v == 1.5,
+        "Data de Início": lambda v: isinstance(v, datetime.datetime),
+        "Actualizado em": lambda v: isinstance(v, datetime.datetime) and v.hour == 16,
+        "IMEI": lambda v: isinstance(v, str),
+        "Duração": lambda v: v == 1,
+        "Pendente": lambda v: v in ("Y", "N"),
+    }
+    for col, ok in expect.items():
+        if col in ci and first and not ok(first[ci[col]]):
+            problems.append("%s has wrong value/type: %r" % (col, first[ci[col]]))
     if "cb" in ci or None in ci:
         problems.append("hidden column exported")
     h = ws["A1"]

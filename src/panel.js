@@ -45,12 +45,27 @@
       .err { background:#ffebee; border:1px solid #ef9a9a; color:#8a1c1c; padding:10px; border-radius:8px; margin-top:12px; }
       textarea { width:100%; box-sizing:border-box; height:110px; font:12px/1.3 Consolas, monospace; margin-top:8px;
                  border:1px solid #c7d0db; border-radius:6px; padding:6px; }
+      .cols { margin-top:12px; padding-top:10px; border-top:1px solid #e4e7eb; }
+      .opt { display:flex; align-items:center; gap:6px; margin-top:6px; cursor:pointer; }
+      .opt input[type=radio] { margin:0; }
+      input[type=number] { width:52px; font:inherit; padding:3px 4px; border:1px solid #c7d0db; border-radius:6px; }
+      input[type=number].bad { border-color:#d93025; background:#ffebee; }
+      .preview { font-size:12px; color:#52606d; margin:2px 0 0 22px; }
+      .colerr { color:#b42318; font-size:13px; margin-top:6px; }
       .hidden { display:none !important; }
     </style>
     <div class="box">
       <div class="head"><span>Extract to Excel</span><button class="x" title="Close">×</button></div>
       <div class="body">
         <div id="pick"></div>
+        <div class="cols hidden" id="cols">
+          <div class="label">Columns to export</div>
+          <label class="opt"><input type="radio" name="cm" id="cmFirst" value="first">
+            Only the first <input type="number" id="ncols" min="1" max="15" step="1" value="8"> columns</label>
+          <div class="preview" id="colprev"></div>
+          <label class="opt"><input type="radio" name="cm" id="cmAll" value="all"> <span>All columns (<span id="nall"></span>)</span></label>
+          <div class="colerr hidden" id="colerr">Type a whole number from 1 to 15.</div>
+        </div>
         <button class="main" id="start">Extract to Excel</button>
         <button class="sec hidden" id="stop">Stop</button>
         <div class="status" id="status"></div>
@@ -69,6 +84,56 @@
   let lists = [];
   let timer = null;
   let lastFile = null;
+
+  // ---- column choice: every time the panel opens it starts on "only the first 8 columns"
+  const DEFAULT_COLS = 8, MAX_COLS = 15;
+  function resetChoice() {
+    $("cmFirst").checked = true;
+    $("cmAll").checked = false;
+    $("ncols").value = String(DEFAULT_COLS);
+  }
+
+  function currentList() {
+    const sel = $("sel");
+    return lists[sel ? +sel.value : 0];
+  }
+
+  // {ok, maxColumns}: maxColumns null means all columns
+  function readChoice() {
+    if ($("cmAll").checked) return { ok: true, maxColumns: null };
+    const v = $("ncols").value.trim();
+    const n = /^\d+$/.test(v) ? parseInt(v, 10) : NaN;
+    if (n >= 1 && n <= MAX_COLS) return { ok: true, maxColumns: n };
+    return { ok: false };
+  }
+
+  function updateColumns() {
+    const l = currentList();
+    if (!l) return;
+    const all = l.columns || [];
+    $("nall").textContent = all.length;
+    const c = readChoice();
+    const bad = !c.ok;
+    $("ncols").classList.toggle("bad", bad);
+    $("colerr").classList.toggle("hidden", !bad);
+    if (c.ok && c.maxColumns) {
+      const shown = all.slice(0, c.maxColumns);
+      $("colprev").textContent = shown.join(", ");
+      $("colprev").classList.remove("hidden");
+    } else {
+      $("colprev").classList.add("hidden");
+    }
+    if (!timer) $("start").disabled = bad;
+  }
+
+  function setColumnsEnabled(on) {
+    ["cmFirst", "cmAll", "ncols"].forEach((id) => { $(id).disabled = !on; });
+  }
+
+  $("cmFirst").addEventListener("change", updateColumns);
+  $("cmAll").addEventListener("change", updateColumns);
+  $("ncols").addEventListener("input", () => { $("cmFirst").checked = true; updateColumns(); });
+  $("ncols").addEventListener("focus", () => { if (!$("cmFirst").checked) { $("cmFirst").checked = true; updateColumns(); } });
 
   function report(err) {
     return ["=== Siebel Table Extractor - error report ===",
@@ -106,23 +171,31 @@
     $("result").innerHTML = ""; $("err").classList.add("hidden"); $("bar").classList.add("hidden"); $("status").textContent = "";
     try { lists = api.detect(); } catch (e) { lists = []; showError(report(e && e.stack || e)); }
     if (!lists.length) {
+      $("cols").classList.add("hidden");
       $("pick").innerHTML = '<div class="warn">No Siebel list with data was found on this page.<br><br>Open the list in Siebel (with the results showing) and click the bookmark again.</div>';
       $("start").disabled = true;
       return;
     }
     $("start").disabled = false;
     if (lists.length === 1) {
-      $("pick").innerHTML = '<div class="label">List found</div><div class="value">' + esc(lists[0].title) +
+      $("pick").innerHTML = (lists[0].client ? '<div class="label">Client</div><div class="value">' + esc(lists[0].client) + '</div><div style="height:8px"></div>' : "") +
+        '<div class="label">List found</div><div class="value">' + esc(lists[0].title) +
         '</div><div class="small" id="ctr">' + esc(lists[0].counter) + "</div>";
     } else {
       $("pick").innerHTML = '<div class="label">Choose the list</div><select id="sel">' +
         lists.map((l, i) => '<option value="' + i + '">' + esc(l.title + (l.counter ? "  (" + l.counter + ")" : "")) + "</option>").join("") + "</select>";
+      $("sel").addEventListener("change", updateColumns);
     }
+    $("cols").classList.remove("hidden");
+    resetChoice();
+    updateColumns();
   }
 
   function finish() {
     clearInterval(timer); timer = null;
-    $("start").disabled = false; $("start").textContent = "Extract again";
+    $("start").textContent = "Extract again";
+    setColumnsEnabled(true);
+    updateColumns();
     $("stop").classList.add("hidden"); $("bar").classList.add("hidden");
   }
 
@@ -139,7 +212,7 @@
       lastFile = r;
       download(r.base64, r.name);
       $("status").textContent = "";
-      let html = '<div class="ok"><b>Done!</b> ' + r.rows + " rows exported" + (r.total != null ? " (Siebel total: " + r.total + ")" : "") +
+      let html = '<div class="ok"><b>Done!</b> ' + r.rows + " rows and " + r.columns + " columns exported" + (r.total != null ? " (Siebel total: " + r.total + ")" : "") +
         ".<br>The file <b>" + esc(r.name) + '</b> is in your Downloads folder.<br><button class="sec" id="again">Download again</button></div>';
       if (r.warnings.length) html += '<div class="warn"><b>Please check:</b><br>' + r.warnings.map(esc).join("<br>") + "</div>";
       $("result").innerHTML = html;
@@ -151,8 +224,11 @@
     if (timer) return;
     $("result").innerHTML = ""; $("err").classList.add("hidden");
     const sel = $("sel");
-    try { api.start(sel ? +sel.value : 0); } catch (e) { showError(report(e && e.stack || e)); return; }
+    const c = readChoice();
+    if (!c.ok) { updateColumns(); return; }
+    try { api.start(sel ? +sel.value : 0, { maxColumns: c.maxColumns }); } catch (e) { showError(report(e && e.stack || e)); return; }
     $("start").disabled = true;
+    setColumnsEnabled(false);
     $("stop").classList.remove("hidden");
     $("status").textContent = "Starting..."; setBar(null);
     timer = setInterval(poll, 400);
