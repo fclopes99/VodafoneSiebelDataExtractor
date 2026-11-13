@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.1.0 – 2026-11-13
+- Fix: on the real Siebel, the "next" arrow ignored the click and the extraction stopped after
+  page 1. If a click doesn't change the page, it now tries a full mouse click, Siebel's own paging
+  command, and the Enter key, and keeps using the one that works.
+- If paging still fails, the error report includes details about the arrow and Siebel.
+
 ## 3.0.0 – 2026-11-13
 - Now a bookmark button that runs in the Chrome window already open (company-managed Chrome
   blocks extensions, and Chrome doesn't let outside programs control an open window).

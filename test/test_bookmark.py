@@ -24,13 +24,15 @@ from cdp import Tab, http_get_json  # noqa: E402
 from check_xlsx import check  # noqa: E402
 
 PORT = 9339
-CASES = [
-    ("45 records (last page overlaps)", 45, 0),
-    ("42 records", 42, 0),
-    ("40 records (exact pages)", 40, 0),
-    ("20 records (one page)", 20, 0),
-    ("7 records", 7, 0),
-    ("start on page 2", 65, 21),
+CASES = [  # name, records, start at record, how the pager reacts
+    ("45 records (last page overlaps)", 45, 0, "click"),
+    ("42 records", 42, 0, "click"),
+    ("40 records (exact pages)", 40, 0, "click"),
+    ("20 records (one page)", 20, 0, "click"),
+    ("7 records", 7, 0, "click"),
+    ("start on page 2", 65, 21, "click"),
+    ("21 records, pager ignores click()", 21, 0, "mousedown"),
+    ("45 records, only Siebel command works", 45, 21, "siebel"),
 ]
 PANEL = "document.getElementById('siebel-table-extractor-panel').shadowRoot"
 
@@ -77,21 +79,21 @@ def main():
         ws = [t for t in http_get_json("http://127.0.0.1:%d/json/list" % PORT) if t["type"] == "page"][0]
         tab = Tab(ws["webSocketDebuggerUrl"])
 
-        def open_page(total, start_at=0):
+        def open_page(total, start_at=0, mode="click"):
             tab.call("Page.navigate", {"url": url})
             time.sleep(1.0)
-            tab.evaluate("window.__MOCK = {total: %d, startAt: %d}; true" % (total, start_at))
+            tab.evaluate("window.__MOCK = {total: %d, startAt: %d, mode: %s}; true" % (total, start_at, json.dumps(mode)))
             tab.evaluate(mock + "\ntrue;")
 
         def click_bookmark():
             tab.evaluate("location.href = %s; true" % json.dumps(href))
             wait(lambda: tab.evaluate("!!document.getElementById('siebel-table-extractor-panel')"), 10, "panel")
 
-        for name, total, start_at in CASES:
-            dl = os.path.join(work, "dl_%d_%d" % (total, start_at))
+        for name, total, start_at, mode in CASES:
+            dl = os.path.join(work, "dl_%d_%d_%s" % (total, start_at, mode))
             os.makedirs(dl)
             tab.call("Browser.setDownloadBehavior", {"behavior": "allow", "downloadPath": dl})
-            open_page(total, start_at)
+            open_page(total, start_at, mode)
             click_bookmark()
             tab.evaluate(PANEL + ".getElementById('start').click(); true")
             text = wait(lambda: (lambda t: t if ("Done!" in t or "went wrong" in t) else None)(
@@ -105,6 +107,18 @@ def main():
                 problems.append("total not shown: " + text)
             failed += bool(problems)
             print(("PASS " if not problems else "FAIL ") + name + ("" if not problems else "\n   " + "\n   ".join(problems)))
+
+        # Pager that never reacts: an error with diagnostics, not a hang
+        open_page(42, 0, "dead")
+        click_bookmark()
+        tab.evaluate(PANEL + ".getElementById('start').click(); true")
+        wait(lambda: tab.evaluate(PANEL + ".getElementById('errtext').value"), 90, "error report")
+        rep = tab.evaluate(PANEL + ".getElementById('errtext').value")
+        ok = "Tried: click (no change); mouse events (no change); Siebel command (failed" in rep and "Button HTML" in rep
+        print(("PASS " if ok else "FAIL ") + "dead pager gives an error report with diagnostics")
+        failed += not ok
+        if not ok:
+            print(rep)
 
         # Clicking the bookmark a second time just shows the panel again
         open_page(42)

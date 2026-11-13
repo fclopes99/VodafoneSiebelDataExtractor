@@ -48,14 +48,23 @@
     setTimeout(() => { fn(); render(); load.style.display = "none"; }, 300 + Math.random() * 500);
   }
   const btn = (w) => document.getElementById(w + "_pager_" + GRID);
-  btn("next").addEventListener("click", function () {
-    if (this.classList.contains("ui-state-disabled")) return;
-    go(() => { start += PAGE; if (start + PAGE - 1 > N) start = Math.max(1, N - PAGE + 1); });
-  });
-  btn("first").addEventListener("click", function () {
-    if (this.classList.contains("ui-state-disabled")) return;
-    go(() => { start = 1; });
-  });
+  const doNext = () => go(() => { start += PAGE; if (start + PAGE - 1 > N) start = Math.max(1, N - PAGE + 1); });
+  const doFirst = () => go(() => { start = 1; });
+  // cfg.mode: "click" (default) - normal click handler on the button
+  //           "mousedown"       - reacts only to mousedown (plain .click() is ignored)
+  //           "siebel"          - buttons do nothing; only the SiebelApp paging command works
+  const mode = cfg.mode || "click";
+  if (mode === "click" || mode === "mousedown") {
+    const ev = mode;
+    btn("next").addEventListener(ev, function () { if (!this.classList.contains("ui-state-disabled")) doNext(); });
+    btn("first").addEventListener(ev, function () { if (!this.classList.contains("ui-state-disabled")) doFirst(); });
+  }
+  if (mode === "siebel") {
+    const C = { PHYEVENT_VSCROLL_LIST: "PHYEVENT_VSCROLL_LIST", PAG_NEXT_SET: "PAG_NEXT_SET", PAG_FIRST_SET: "PAG_FIRST_SET" };
+    const pm = { OnControlEvent: (ev, what) => { if (ev !== C.PHYEVENT_VSCROLL_LIST) return; if (what === C.PAG_NEXT_SET) doNext(); if (what === C.PAG_FIRST_SET) doFirst(); } };
+    const applet = { GetFullId: () => "S_A1", GetPModel: () => pm };
+    window.SiebelApp = { Constants: { get: (k) => C[k] }, S_App: { GetActiveView: () => ({ GetAppletMap: () => ({ "Contratos List Applet": applet }) }) } };
+  }
   if (cfg.startAt) start = cfg.startAt;
   render();
 })();

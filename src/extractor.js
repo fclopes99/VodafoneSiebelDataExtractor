@@ -152,8 +152,129 @@
   const pagerButton = (grid, which) => grid.doc.getElementById(which + "_pager_" + grid.id);
   const isEnabled = (btn) => !!btn && !btn.classList.contains("ui-state-disabled") && !isHidden(btn);
 
-  function clickPager(btn) {
-    (btn.querySelector("span[role='button'], span.ui-icon") || btn).click();
+  // ---- Ways to press a pager button. Siebel may ignore a plain click(), so there are several,
+  // tried in order until the page changes. The one that works is reused for the next pages.
+  function pagerTarget(btn) {
+    return btn.querySelector("span[role='button'], span.ui-icon") || btn;
+  }
+
+  function mouseSequence(btn) {
+    const el = pagerTarget(btn);
+    const r = el.getBoundingClientRect();
+    const view = el.ownerDocument.defaultView;
+    const opts = { bubbles: true, cancelable: true, view, button: 0, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 };
+    const P = view.PointerEvent || view.MouseEvent;
+    el.dispatchEvent(new P("pointerover", opts));
+    el.dispatchEvent(new view.MouseEvent("mouseover", opts));
+    el.dispatchEvent(new view.MouseEvent("mouseenter", Object.assign({}, opts, { bubbles: false })));
+    el.dispatchEvent(new P("pointerdown", Object.assign({ buttons: 1 }, opts)));
+    el.dispatchEvent(new view.MouseEvent("mousedown", Object.assign({ buttons: 1 }, opts)));
+    if (el.focus) el.focus();
+    el.dispatchEvent(new P("pointerup", opts));
+    el.dispatchEvent(new view.MouseEvent("mouseup", opts));
+    el.dispatchEvent(new view.MouseEvent("click", opts));
+  }
+
+  function siebelApplet(grid) {
+    const SA = grid.doc.defaultView.SiebelApp;
+    if (!SA || !SA.S_App || !SA.S_App.GetActiveView) throw new Error("SiebelApp is not available on this page");
+    const view = SA.S_App.GetActiveView();
+    const map = view.GetAppletMap();
+    for (const name in map) {
+      const a = map[name];
+      let fullId = "";
+      try { fullId = a.GetFullId(); } catch (_) { continue; }
+      const box = grid.doc.getElementById(fullId) || grid.doc.getElementById("s_" + fullId + "_div");
+      if (box && box.contains(grid.table)) return { SA, applet: a, name, fullId };
+    }
+    throw new Error("No Siebel applet contains the list " + grid.id);
+  }
+
+  const PAGER_CONSTANTS = {
+    next: ["PAG_NEXT_SET"],
+    first: ["PAG_FIRST_SET", "PAG_FIRST_RECORD"],
+  };
+
+  function siebelCommand(grid, which) {
+    const { SA, applet, name } = siebelApplet(grid);
+    const consts = SA.Constants;
+    const evName = consts.get("PHYEVENT_VSCROLL_LIST");
+    const pag = PAGER_CONSTANTS[which].map((c) => consts.get(c)).find((v) => v != null && v !== "");
+    if (!evName || pag == null) throw new Error("Siebel paging constants not found (" + evName + ", " + pag + ")");
+    log("Siebel command on applet \"" + name + "\": OnControlEvent(" + evName + ", " + pag + ")");
+    applet.GetPModel().OnControlEvent(evName, pag);
+  }
+
+  function keyboardEnter(btn) {
+    const el = pagerTarget(btn);
+    const view = el.ownerDocument.defaultView;
+    if (el.focus) el.focus();
+    for (const type of ["keydown", "keypress", "keyup"]) {
+      el.dispatchEvent(new view.KeyboardEvent(type, { bubbles: true, cancelable: true, key: "Enter", code: "Enter", keyCode: 13, which: 13 }));
+    }
+  }
+
+  const PRESS_METHODS = [
+    ["click", (grid, btn) => pagerTarget(btn).click()],
+    ["mouse events", (grid, btn) => mouseSequence(btn)],
+    ["Siebel command", (grid, btn, which) => siebelCommand(grid, which)],
+    ["Enter key", (grid, btn) => keyboardEnter(btn)],
+  ];
+  let workingMethod = -1;
+
+  function describePager(grid, btn) {
+    const lines = [];
+    try {
+      lines.push("Button HTML: " + (btn ? btn.outerHTML.slice(0, 600) : "not found"));
+      const jq = grid.doc.defaultView.jQuery;
+      if (jq && jq._data && btn) {
+        const names = (el) => Object.keys(jq._data(el, "events") || {}).join(",") || "none";
+        lines.push("jQuery events: td=" + names(btn) + " span=" + names(pagerTarget(btn)) +
+          " pager=" + names(btn.closest(".ui-jqgrid-pager") || btn) + " document=" + names(grid.doc));
+      }
+      const SA = grid.doc.defaultView.SiebelApp;
+      lines.push("SiebelApp: " + (SA ? "yes" : "no"));
+      if (SA) {
+        try { const a = siebelApplet(grid); lines.push("Applet: " + a.name + " (" + a.fullId + ")"); } catch (e) { lines.push("Applet: " + e.message); }
+        try {
+          lines.push("Constants: " + ["PHYEVENT_VSCROLL_LIST", "PAG_NEXT_SET", "PAG_FIRST_SET", "PAG_PREV_SET", "PAG_LAST_SET"]
+            .map((c) => c + "=" + SA.Constants.get(c)).join(" "));
+        } catch (e) { lines.push("Constants: " + e.message); }
+      }
+    } catch (e) {
+      lines.push("Diagnostics failed: " + e.message);
+    }
+    return lines;
+  }
+
+  // Presses the pager button and waits for the new page.
+  async function pressPager(grid, which, what) {
+    const before = pageSignature(grid);
+    const order = workingMethod >= 0 ? [workingMethod] : PRESS_METHODS.map((_, i) => i);
+    const tried = [];
+    for (const i of order) {
+      const [name, fn] = PRESS_METHODS[i];
+      const btn = pagerButton(grid, which);
+      try {
+        fn(grid, btn, which);
+      } catch (e) {
+        tried.push(name + " (failed: " + e.message + ")");
+        log("Press '" + which + "' with " + name + " failed: " + e.message);
+        continue;
+      }
+      // The first time, give each method a short time; once one works, use the full timeout.
+      const limit = workingMethod >= 0 ? PAGE_TIMEOUT_MS : 8000;
+      if (await waitForPageChange(grid, before, limit)) {
+        if (workingMethod !== i) log("Paging works with: " + name);
+        workingMethod = i;
+        return;
+      }
+      tried.push(name + " (no change)");
+      log("Press '" + which + "' with " + name + ": page did not change");
+    }
+    describePager(grid, pagerButton(grid, which)).forEach(log);
+    throw new Error("Siebel did not load the " + what + " page. Tried: " + tried.join("; ") +
+      ". Counter shows: \"" + counterText(grid) + "\".");
   }
 
   function pageSignature(grid) {
@@ -184,11 +305,12 @@
     }
   }
 
-  async function waitForPageChange(grid, before, what) {
+  // Returns true once the page changed and settled, false after limitMs without a change.
+  async function waitForPageChange(grid, before, limitMs) {
     const t0 = Date.now();
     let changedAt = 0;
     let lastSig = before;
-    while (Date.now() - t0 < PAGE_TIMEOUT_MS) {
+    while (Date.now() - t0 < limitMs || (changedAt && Date.now() - t0 < PAGE_TIMEOUT_MS)) {
       if (job.stopRequested) throw new UserStop();
       await sleep(150);
       refreshGrid(grid);
@@ -197,13 +319,10 @@
       if (sig !== before) {
         // Wait until the page stops changing (rows can render in steps).
         if (sig !== lastSig) { lastSig = sig; changedAt = Date.now(); continue; }
-        if (Date.now() - changedAt >= 400) return;
+        if (Date.now() - changedAt >= 400) return true;
       }
     }
-    throw new Error(
-      "Siebel did not load the " + what + " page within " + PAGE_TIMEOUT_MS / 1000 + " seconds. " +
-      "Counter shows: \"" + counterText(grid) + "\"."
-    );
+    return false;
   }
 
   // ------------------------------------------------------------------ value conversion
@@ -276,6 +395,7 @@
 
   async function extract(grid) {
     job.pages = 0;
+    workingMethod = -1;
     log("Start. Grid " + grid.id + " \"" + grid.title + "\", counter \"" + counterText(grid) + "\"");
 
     const cols = getColumns(grid);
@@ -286,9 +406,7 @@
     const first = pagerButton(grid, "first");
     if (isEnabled(first)) {
       progress("Going back to the first page...");
-      const before = pageSignature(grid);
-      clickPager(first);
-      await waitForPageChange(grid, before, "first");
+      await pressPager(grid, "first", "first");
       log("Moved to first page. Counter \"" + counterText(grid) + "\"");
     }
 
@@ -339,9 +457,7 @@
         log("Next button disabled - last page reached.");
         break;
       }
-      const before = pageSignature(grid);
-      clickPager(next);
-      await waitForPageChange(grid, before, "next");
+      await pressPager(grid, "next", "next");
     }
 
     let rows;
