@@ -1,0 +1,56 @@
+name: Build Windows app
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tools
+        run: pip install pyinstaller==6.11.1 openpyxl==3.1.5
+
+      - name: Test extraction against Chrome
+        run: python test/test_app.py
+
+      - name: Build SiebelTableExtractor.exe
+        run: >
+          pyinstaller --noconfirm --onefile --windowed
+          --name SiebelTableExtractor
+          --icon app/icon.ico
+          --add-data "app/js;js"
+          --add-data "app/icon.ico;."
+          --paths app
+          app/main.py
+
+      - name: Check the exe starts its bundled code
+        shell: pwsh
+        run: |
+          if (!(Test-Path dist/SiebelTableExtractor.exe)) { throw "exe missing" }
+          (Get-Item dist/SiebelTableExtractor.exe).Length / 1MB
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SiebelTableExtractor
+          path: dist/SiebelTableExtractor.exe
+
+      - name: Publish release (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/SiebelTableExtractor.exe
+          body: |
+            Download **SiebelTableExtractor.exe** below. See the README for how to use it.

@@ -1,5 +1,7 @@
 test/fixtures/
 test/out/
 dist/
-node_modules/
+build/
+*.spec
+__pycache__/
 *.xlsx

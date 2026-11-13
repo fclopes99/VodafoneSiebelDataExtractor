@@ -1,35 +1,35 @@
 # Siebel Table Extractor
 
-A Chrome extension that exports a Siebel list to Excel. It reads **all pages** of the list
-by clicking the "next" arrow, removes the rows Siebel repeats on the last page, and
-downloads an `.xlsx` file.
+A small Windows program that exports a Siebel list to Excel. It reads **all pages** of the list
+by clicking the "next" arrow for you, removes the rows Siebel repeats on the last page, and
+saves an `.xlsx` file in your Downloads folder.
 
-## Install (one time)
+## Download
 
-1. Unzip the extension into a folder you will **keep**, for example
-   `Documents\SiebelTableExtractor`. Chrome loads it from this folder every time, so don't delete it.
-2. In Chrome, type `chrome://extensions` in the address bar and press Enter.
-3. Turn on **Developer mode** (switch at the top right).
-4. Click **Load unpacked** and choose the folder that contains `manifest.json`.
-5. Pin it: click the puzzle icon 🧩 next to the address bar and click the pin next to
-   **Siebel Table Extractor**. A green table icon appears in the toolbar.
+Get **SiebelTableExtractor.exe** from the latest release:
+https://github.com/fclopes99/VodafoneSiebelDataExtractor/releases/latest
 
-If Chrome shows a message about developer-mode extensions when it starts, you can close it.
+Nothing to install: save it somewhere (for example your Desktop) and double-click it.
+If Windows shows *"Windows protected your PC"*, click **More info** → **Run anyway**.
 
 ## Use
 
-1. In Siebel, open the list and search so the results are showing.
-2. Click the green table icon in the toolbar. A small panel opens at the top right of the page.
-3. Click **Extract to Excel**. Don't use Siebel in that tab until it finishes.
-4. When it shows **Done!**, the file is in your **Downloads** folder, named after the list
-   (for example `Contratos_de_Permanencia_Activos_2026-11-13_1530.xlsx`).
+1. **Open Chrome** – click **Open Chrome** in the app. This opens a separate Chrome window that
+   the app can read (your normal Chrome can't be used, Chrome doesn't allow it).
+   The first time, log in to Siebel in that window. You can type the Siebel address in the app
+   so Chrome opens it directly; it is remembered.
+2. **Choose the tab** – in that Chrome window, open the Siebel list and search so the results
+   show. The tab appears in the app's list; select it.
+3. **Extract** – click **Extract to Excel**. Don't use Siebel in that tab until it finishes.
+   When it says **Done!**, click **Open file**.
 
-The panel always starts from the first page. At the end it compares the number of rows with
-the total Siebel reports, and shows a yellow **Please check** box if they don't match.
+The app always starts from the first page. At the end it compares the number of rows with the
+total Siebel reports and shows **Please check** if they don't match.
 
 ### If something goes wrong
 
-The panel shows a red box. Click **Copy error** and send the copied text so it can be fixed.
+The app shows the problem in red. Click **Copy error** and send the copied text so it can be fixed.
+A log is also kept in `%LOCALAPPDATA%\SiebelTableExtractor\log.txt`.
 
 ## What ends up in the Excel file
 
@@ -40,20 +40,37 @@ The panel shows a red box. Click **Copy error** and send the copied text so it c
 - Long numbers (phone numbers, IMEI, IDs) and anything with letters → text, exactly as shown.
 - Checkbox columns → `Y` / `N`.
 
-## Update to a new version
+## How it works (for developers)
 
-Replace the files in your folder with the new ones, open `chrome://extensions`, and click the
-round reload arrow on the **Siebel Table Extractor** card.
+- `app/main.py` – the window (tkinter).
+- `app/core.py` – starts Chrome with `--remote-debugging-port=9222` and its own profile in
+  `%LOCALAPPDATA%\SiebelTableExtractor\ChromeProfile` (Chrome ignores remote debugging on the
+  default profile), lists tabs, runs the extraction and saves the file.
+- `app/cdp.py` – a small Chrome DevTools Protocol client using only the standard library
+  (ignores proxy settings, which matters on company PCs).
+- `app/js/extractor.js` – injected into the Siebel tab: finds the Siebel jqGrid list, pages
+  through it and converts values. Rows are placed by their record number from the Siebel
+  counter (`21 - 40 de 42+`), so the overlap on the last page is removed exactly.
+- `app/js/xlsx.js` – a small `.xlsx` writer.
 
-## For developers
+### Tests
 
-- `extension/` – the extension (Manifest V3, no external libraries).
-  - `background.js` – injects the scripts when the toolbar icon is clicked.
-  - `extractor.js` – finds the Siebel jqGrid list, pages through it, converts values, shows the panel.
-  - `xlsx.js` – a small `.xlsx` writer.
-- Rows are placed by their record number from the Siebel counter (`21 - 40 de 42+`), so the
-  overlap on the last page is removed exactly.
-- Tests: `node test/run_tests.js <saved Siebel page.html>` (needs Playwright and Python with
-  `openpyxl`). The test turns a saved Siebel page into a fake paging list with made-up records.
-  Don't commit saved Siebel pages: they contain customer data. `test/fixtures/` is git-ignored.
-- Package: `./build.sh` → `dist/siebel-table-extractor-v<version>.zip`.
+```
+pip install openpyxl
+python test/test_app.py
+```
+
+This starts Chrome, opens `test/synthetic_page.html` (made-up data with the same structure as a
+Siebel list) with fake paging (`test/mock_siebel.js`), and checks the Excel files.
+`python test/test_app.py <saved page.html>` runs the same tests on a saved Siebel page.
+**Never commit saved Siebel pages: they contain customer data.** `test/fixtures/` is git-ignored.
+
+### Building the exe
+
+GitHub Actions builds the exe on Windows for every push (`.github/workflows/build.yml`).
+Pushing a tag like `v2.0.0` also publishes it as a release. To build locally on Windows:
+
+```
+pip install pyinstaller
+pyinstaller --onefile --windowed --name SiebelTableExtractor --icon app/icon.ico --add-data "app/js;js" --add-data "app/icon.ico;." --paths app app/main.py
+```
