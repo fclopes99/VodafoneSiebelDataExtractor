@@ -1,0 +1,5 @@
+test/fixtures/
+test/out/
+dist/
+node_modules/
+*.xlsx
