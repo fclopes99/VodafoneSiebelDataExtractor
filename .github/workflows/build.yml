@@ -1,4 +1,4 @@
-name: Build Windows app
+name: Test and publish
 
 on:
   push:
@@ -19,41 +19,21 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install build tools
-        run: pip install pyinstaller==6.11.1 openpyxl==3.1.5
+      - run: pip install openpyxl==3.1.5
 
-      - name: Test extraction against Chrome
-        run: python test/test_app.py
+      - name: Build the install page
+        run: python build.py
 
-      - name: Build SiebelTableExtractor.exe
-        run: >
-          pyinstaller --noconfirm --onefile --windowed
-          --name SiebelTableExtractor
-          --icon app/icon.ico
-          --add-data "app/js;js"
-          --add-data "app/icon.ico;."
-          --paths app
-          app/main.py
-
-      - name: Check the exe starts its bundled code
-        shell: pwsh
-        run: |
-          if (!(Test-Path dist/SiebelTableExtractor.exe)) { throw "exe missing" }
-          (Get-Item dist/SiebelTableExtractor.exe).Length / 1MB
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: SiebelTableExtractor
-          path: dist/SiebelTableExtractor.exe
+      - name: Test the bookmark in Chrome
+        run: python test/test_bookmark.py
 
       - name: Read version
         id: version
         shell: pwsh
         run: |
-          $v = (Select-String -Path app/version.py -Pattern '"(.+)"').Matches[0].Groups[1].Value
-          "version=$v" >> $env:GITHUB_OUTPUT
+          "version=$((Get-Content VERSION).Trim())" >> $env:GITHUB_OUTPUT
 
-      - name: Publish release (pushes to main)
+      - name: Publish release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
@@ -61,6 +41,6 @@ jobs:
           name: Version ${{ steps.version.outputs.version }}
           target_commitish: ${{ github.sha }}
           make_latest: true
-          files: dist/SiebelTableExtractor.exe
+          files: dist/Install-Extract-to-Excel.html
           body: |
-            Download **SiebelTableExtractor.exe** below. See the README for how to use it.
+            Download **Install-Extract-to-Excel.html** below, open it in Chrome and follow the steps on the page.
