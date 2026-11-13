@@ -67,8 +67,8 @@ Siebel list) with fake paging (`test/mock_siebel.js`), and checks the Excel file
 
 ### Building the exe
 
-GitHub Actions builds the exe on Windows for every push (`.github/workflows/build.yml`).
-Pushing a tag like `v2.0.0` also publishes it as a release. To build locally on Windows:
+GitHub Actions tests and builds the exe on Windows (`.github/workflows/build.yml`). Every push to
+`main` publishes it as the release named after `app/version.py` (bump the version for a new release). To build locally on Windows:
 
 ```
 pip install pyinstaller
