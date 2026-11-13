@@ -128,6 +128,16 @@ def main():
         print(("PASS " if n == 1 else "FAIL ") + "second click reuses the panel")
         failed += n != 1
 
+        # A panel left open by an older version is replaced by the new one
+        tab.evaluate("document.getElementById('siebel-table-extractor-panel').dataset.version = '0.0.1';"
+                     "window.__steExtractor.version = '0.0.1'; true")
+        click_bookmark()
+        v = tab.evaluate("[document.querySelectorAll('#siebel-table-extractor-panel').length,"
+                         " document.getElementById('siebel-table-extractor-panel').dataset.version]")
+        ok = v == [1, open(os.path.join(HERE, "..", "VERSION")).read().strip()]
+        print(("PASS " if ok else "FAIL ") + "old panel replaced by new version %s" % v)
+        failed += not ok
+
         # Stop button
         tab.evaluate(PANEL + ".getElementById('start').click(); true")
         time.sleep(1.0)

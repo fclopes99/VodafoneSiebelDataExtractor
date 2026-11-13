@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.1.1 – 2026-11-13
+- Fix: a panel left open on the page by an older version was reused, so the old code ran.
+  The new version now replaces it.
+
 ## 3.1.0 – 2026-11-13
 - Fix: on the real Siebel, the "next" arrow ignored the click and the extraction stopped after
   page 1. If a click doesn't change the page, it now tries a full mouse click, Siebel's own paging

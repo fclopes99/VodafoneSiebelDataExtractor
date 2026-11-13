@@ -2,12 +2,21 @@
 (function () {
   "use strict";
   const ID = "siebel-table-extractor-panel";
-  const old = document.getElementById(ID);
-  if (old) { old.style.display = "block"; if (window.__steShowPanel) window.__steShowPanel(); return; }
-
   const api = window.__steExtractor;
+  const old = document.getElementById(ID);
+  if (old) {
+    // Same version: just show it again. A panel left open by an older version is replaced.
+    if (old.dataset.version === api.version) {
+      old.style.display = "block";
+      if (window.__steShowPanel) window.__steShowPanel();
+      return;
+    }
+    old.remove();
+  }
+
   const host = document.createElement("div");
   host.id = ID;
+  host.dataset.version = api.version;
   host.style.cssText = "position:fixed;top:12px;right:12px;z-index:2147483647;";
   const root = host.attachShadow({ mode: "open" });
   root.innerHTML = `
